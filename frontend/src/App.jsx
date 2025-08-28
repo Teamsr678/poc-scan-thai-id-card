@@ -17,6 +17,7 @@ function getMaskedText(mt) {
 }
 
 const API_URL = import.meta.env.VITE_API_URL || "http://localhost:8080";
+// const API_URL = "http://192.168.0.237:8080";
 
 export default function App() {
   const {
@@ -33,6 +34,7 @@ export default function App() {
   const [error, setError] = useState(null);
   const [rawJSON, setRawJSON] = useState("");
   const [previewUrl, setPreviewUrl] = useState("");
+  const [cardData, setCardData] = useState("");
 
   const dropRef = useRef(null);
   const pollStopRef = useRef(false);
@@ -113,8 +115,11 @@ export default function App() {
         setStatus("done");
         setResult(js);
         setFileAndPreview(chosen)
+        setCardData(JSON.parse(JSON.stringify(js, null, 2)))
+        console.log(cardData)
       }
     } catch (e) {
+      setStatus("failed");
       setError(e.message || "เกิดข้อผิดพลาดระหว่างอัปโหลด");
     }
   };
@@ -247,7 +252,7 @@ export default function App() {
           {previewUrl && (
             <div className="w-full max-w-3xl mt-4">
             <div className="p-4 bg-white rounded-xl shadow">
-            <div className="font-medium mb-2">ภาพต้นฉบับ (Preview)</div>
+            <div className="font-medium mb-2">ภาพต้นฉบับ</div>
             <div className="w-full flex justify-center">
             <img src={previewUrl} alt="uploaded-preview" className="max-h-[420px] w-auto object-contain rounded-lg" />
             </div>
@@ -258,10 +263,116 @@ export default function App() {
             </div>
           )}
 
-          {rawJSON && (
+          {/* {rawJSON && (
             <div className="mt-4 p-4 bg-white rounded-xl shadow">
               <div className="font-medium mb-2">ผลลัพธ์ JSON (Raw)</div>
               <pre className="text-sm overflow-auto whitespace-pre-wrap break-words">{rawJSON}</pre>
+            </div>
+          )} */}
+
+          {cardData && (
+            <div className="mt-4 p-4 bg-white rounded-xl shadow">
+            <div className="font-medium mb-2">ข้อมูลบัตรประชาชน</div>
+            <div className="grid grid-cols-1 gap-4 text-sm">
+              <div className="flex items-center gap-2">
+                <label className="w-40 text-gray-600">เลขบัตรประชาชน</label>
+                <input
+                  type="text"
+                  defaultValue={cardData.id_card}
+                  className="flex-1 px-3 py-2 border rounded-lg focus:outline-none focus:ring focus:border-blue-500"
+                />
+              </div>
+
+              <div className="flex items-center gap-2">
+                <label className="w-40 text-gray-600">คำนำหน้า (TH)</label>
+                <input
+                  type="text"
+                  defaultValue={cardData.prefix_name_th}
+                  className="flex-1 px-3 py-2 border rounded-lg focus:outline-none focus:ring focus:border-blue-500"
+                />
+              </div>
+
+              <div className="flex items-center gap-2">
+                <label className="w-40 text-gray-600">ชื่อ (TH)</label>
+                <input
+                  type="text"
+                  defaultValue={cardData.first_name_th}
+                  className="flex-1 px-3 py-2 border rounded-lg focus:outline-none focus:ring focus:border-blue-500"
+                />
+              </div>
+
+              <div className="flex items-center gap-2">
+                <label className="w-40 text-gray-600">นามสกุล (TH)</label>
+                <input
+                  type="text"
+                  defaultValue={cardData.last_name_th}
+                  className="flex-1 px-3 py-2 border rounded-lg focus:outline-none focus:ring focus:border-blue-500"
+                />
+              </div>
+
+              <div className="flex items-center gap-2">
+                <label className="w-40 text-gray-600">คำนำหน้า (EN)</label>
+                <input
+                  type="text"
+                  defaultValue={cardData.prefix_name_en}
+                  className="flex-1 px-3 py-2 border rounded-lg focus:outline-none focus:ring focus:border-blue-500"
+                />
+              </div>
+
+              <div className="flex items-center gap-2">
+                <label className="w-40 text-gray-600">ชื่อ (EN)</label>
+                <input
+                  type="text"
+                  defaultValue={cardData.first_name_en}
+                  className="flex-1 px-3 py-2 border rounded-lg focus:outline-none focus:ring focus:border-blue-500"
+                />
+              </div>
+
+              <div className="flex items-center gap-2">
+                <label className="w-40 text-gray-600">นามสกุล (EN)</label>
+                <input
+                  type="text"
+                  defaultValue={cardData.last_name_en}
+                  className="flex-1 px-3 py-2 border rounded-lg focus:outline-none focus:ring focus:border-blue-500"
+                />
+              </div>
+
+              <div className="flex items-center gap-2">
+                <label className="w-40 text-gray-600">วันเกิด (TH)</label>
+                <input
+                  type="text"
+                  defaultValue={cardData.date_of_birth_th}
+                  className="flex-1 px-3 py-2 border rounded-lg focus:outline-none focus:ring focus:border-blue-500"
+                />
+              </div>
+
+              <div className="flex items-center gap-2">
+                <label className="w-40 text-gray-600">วันเกิด (EN)</label>
+                <input
+                  type="text"
+                  defaultValue={cardData.date_of_birth_en}
+                  className="flex-1 px-3 py-2 border rounded-lg focus:outline-none focus:ring focus:border-blue-500"
+                />
+              </div>
+
+              <div className="flex items-center gap-2">
+                <label className="w-40 text-gray-600">วันหมดอายุ (TH)</label>
+                <input
+                  type="text"
+                  defaultValue={cardData.date_of_expity_th}
+                  className="flex-1 px-3 py-2 border rounded-lg focus:outline-none focus:ring focus:border-blue-500"
+                />
+              </div>
+
+              <div className="flex items-center gap-2">
+                <label className="w-40 text-gray-600">วันหมดอายุ (EN)</label>
+                <input
+                  type="text"
+                  defaultValue={cardData.date_of_expity_en}
+                  className="flex-1 px-3 py-2 border rounded-lg focus:outline-none focus:ring focus:border-blue-500"
+                />
+              </div>
+            </div>
             </div>
           )}
           </>
