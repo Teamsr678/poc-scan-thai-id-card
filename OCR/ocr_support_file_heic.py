@@ -9,6 +9,8 @@ import shutil
 import uvicorn
 from fastapi import FastAPI, File, UploadFile, HTTPException
 from typing import Dict
+from PIL import Image
+import pillow_heif
 
 # --- IMPORTANT TESSERACT NOTE ---
 # pytesseract requires the Tesseract OCR engine to be installed on your system.
@@ -22,7 +24,7 @@ from typing import Dict
 app = FastAPI(
     title="Thai ID Card OCR API",
     description="An API that uses YOLO and Pytesseract to extract data from a Thai ID card.",
-    version="1.1.0"
+    version="1.2.0"
 )
 
 # --- Global Variables & Model Loading ---
@@ -49,18 +51,19 @@ def crop_card(card_detector_model, image_path):
     img = cv2.imread(image_path)
     if img is None: return None, None
 
-    # --- NEW: Convert image to grayscale ---
+    # --- Convert image to grayscale ---
     gray_img = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
-    img = cv2.cvtColor(gray_img, cv2.COLOR_GRAY2BGR)
-    # --- End of new code ---
+    img_for_detection = cv2.cvtColor(gray_img, cv2.COLOR_GRAY2BGR)
+    # --- End of conversion ---
 
-    results = card_detector_model(img, conf=0.25, iou=0.25) # Pass the modified image to the model
+    results = card_detector_model(img_for_detection, conf=0.25)
     boxes_data = results[0].boxes
     if len(boxes_data) == 0: return None, results
     confidences = boxes_data.conf.cpu().numpy()
     best_box_index = np.argmax(confidences)
     best_box = boxes_data.xyxy.cpu().numpy().astype(int)[best_box_index]
     x1, y1, x2, y2 = best_box
+    # Crop from the original color image (or grayscale if you prefer)
     y1, y2 = max(0, y1), min(img.shape[0], y2)
     x1, x2 = max(0, x1), min(img.shape[1], x2)
     cropped_card = img[y1:y2, x1:x2]
@@ -69,7 +72,7 @@ def crop_card(card_detector_model, image_path):
 def detect_text_fields(text_detector_model, cropped_card_img):
     """Detects text fields, filters for the best detection per label, and returns results."""
     if cropped_card_img is None: return [], None
-    results = text_detector_model(cropped_card_img, conf=0.25, iou=0.25)
+    results = text_detector_model(cropped_card_img, conf=0.25)
     boxes_data = results[0].boxes
     best_detections = {}
     for i in range(len(boxes_data)):
@@ -86,28 +89,16 @@ def detect_text_fields(text_detector_model, cropped_card_img):
 def read_text_from_fields(cropped_card_img, text_fields):
     """Uses pytesseract to read text from each detected field."""
     extracted_data = {}
-    th_labels = ['prefix_name_th', 'first_name_th', 'last_name_th', 'date_of_birth_th', 'date_of_expity_th', 'religion']
-    en_labels = ['prefix_name_en', 'first_name_en', 'last_name_en', 'date_of_birth_en', 'date_of_expity_en']
+    th_labels = ['prefix_name_th', 'first_name_th', 'last_name_th']
+    en_labels = ['prefix_name_en', 'first_name_en', 'last_name_en']
     for field in text_fields:
         box, label = field['box'], field['label']
         text_region = cropped_card_img[box[1]:box[3], box[0]:box[2]]
         if text_region.size > 0:
-            # Select the correct language for Tesseract
-            if label in th_labels:
-                lang = 'tha'
-            elif label in en_labels:
-                lang = 'eng'
-            else:
-                # Use both languages for fields like ID number, dates, etc.
-                lang = 'tha+eng'
-            
-            # Use pytesseract to extract text
-            # --psm 7: Treat the image as a single text line.
+            lang = 'tha' if label in th_labels else ('eng' if label in en_labels else 'tha+eng')
             config = '--psm 7'
             extracted_text = pytesseract.image_to_string(text_region, lang=lang, config=config).strip()
-            
             if extracted_text:
-                # Clean up common OCR errors like newline characters
                 cleaned_text = re.sub(r'[\n\x0c]', '', extracted_text)
                 print(f"  Label '{label}': Read text -> '{cleaned_text}'")
                 extracted_data[label] = cleaned_text
@@ -170,40 +161,61 @@ def run_ocr_pipeline(image_path: str, output_dir: str) -> Dict:
 @app.post("/ocr/thai-id/", response_model=Dict)
 async def process_thai_id(file: UploadFile = File(...)):
     """
-    Accepts an image of a Thai ID card, processes it, and returns the extracted data as JSON.
+    Accepts an image (JPEG, PNG, HEIC) of a Thai ID card, processes it, 
+    and returns the extracted data as JSON.
     """
-    # Create temporary directories for processing
     temp_dir = "temp_uploads"
     output_dir = "output_logs"
     os.makedirs(temp_dir, exist_ok=True)
     os.makedirs(output_dir, exist_ok=True)
     
-    temp_file_path = os.path.join(temp_dir, file.filename)
+    # Use a generic temp name to handle conversion
+    temp_file_path = os.path.join(temp_dir, "temp_image.png") 
+    original_upload_path = os.path.join(temp_dir, file.filename)
 
     try:
-        # Save the uploaded file temporarily
-        with open(temp_file_path, "wb") as buffer:
+        # Save the uploaded file to read its content
+        with open(original_upload_path, "wb") as buffer:
             shutil.copyfileobj(file.file, buffer)
-        
-        # Run the OCR pipeline
+
+        # --- HEIC Conversion Logic ---
+        if file.filename.lower().endswith(('.heic', '.heif')):
+            print(f"HEIC file detected. Converting {file.filename} to PNG...")
+            heif_file = pillow_heif.read_heif(original_upload_path)
+            image = Image.frombytes(
+                heif_file.mode,
+                heif_file.size,
+                heif_file.data,
+                "raw",
+            )
+            # Convert Pillow Image (RGB) to OpenCV format (BGR)
+            image_np_rgb = np.array(image)
+            image_np_bgr = cv2.cvtColor(image_np_rgb, cv2.COLOR_RGB2BGR)
+            # Save the converted image to the path the pipeline will use
+            cv2.imwrite(temp_file_path, image_np_bgr)
+            print("Conversion successful.")
+        else:
+            # If not HEIC, just copy it to the expected temp path
+            shutil.copy(original_upload_path, temp_file_path)
+
+        # Run the OCR pipeline on the (possibly converted) image
         extracted_data = run_ocr_pipeline(temp_file_path, output_dir)
         
         return extracted_data
 
-    except HTTPException as e:
-        # Re-raise HTTP exceptions to be handled by FastAPI
-        raise e
     except Exception as e:
         print(f"An unexpected error occurred: {e}")
         raise HTTPException(status_code=500, detail=f"An internal server error occurred: {e}")
     finally:
-        # Clean up the temporary file
+        # Clean up both temporary files
         if os.path.exists(temp_file_path):
             os.remove(temp_file_path)
+        if os.path.exists(original_upload_path):
+            os.remove(original_upload_path)
 
 # --- How to Run ---
 # 1. Install necessary packages:
-#    pip install fastapi "uvicorn[standard]" python-multipart pytesseract
+#    pip install fastapi "uvicorn[standard]" python-multipart pytesseract pillow-heif
 #
 # 2. Install the Tesseract engine on your system (see note at the top of the file).
 #
@@ -212,7 +224,7 @@ async def process_thai_id(file: UploadFile = File(...)):
 # 4. Run the API server from your terminal:
 #    uvicorn main:app --reload
 #
-# 5. Access the interactive API documentation at http://1227.0.0.1:8000/docs
+# 5. Access the interactive API documentation at http://127.0.0.1:5000/docs
 
 if __name__ == "__main__":
     uvicorn.run(app, host="0.0.0.0", port=5000)
